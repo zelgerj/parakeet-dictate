@@ -1,0 +1,74 @@
+name: Release DMG
+
+# Builds a signed, notarized DMG on every v* tag and attaches it to the release.
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   MACOS_CERT_P12_BASE64  -> base64 -i DeveloperID.p12   (Developer ID cert as .p12)
+#   MACOS_CERT_PASSWORD    -> password of the .p12 export
+#   MACOS_SIGN_IDENTITY    -> "Developer ID Application: NAME (TEAMID)"
+#   NOTARY_APPLE_ID        -> Apple ID
+#   NOTARY_TEAM_ID         -> Team ID
+#   NOTARY_PASSWORD        -> app-specific password (appleid.apple.com)
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write   # to upload the release asset
+
+jobs:
+  build:
+    runs-on: macos-14   # Apple Silicon (required for MLX/Metal)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build the app
+        run: |
+          python packaging/make_icon.py || true
+          pyinstaller --noconfirm packaging/ParakeetDictate.spec
+
+      - name: Import signing certificate into a temporary keychain
+        env:
+          CERT_B64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          CERT_PW: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          echo "$CERT_B64" | base64 --decode > /tmp/cert.p12
+          security create-keychain -p "" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+          security import /tmp/cert.p12 -k build.keychain -P "$CERT_PW" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain >/dev/null
+          rm -f /tmp/cert.p12
+
+      - name: Sign, DMG, notarize, staple
+        env:
+          IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: |
+          APP="dist/Parakeet Dictate.app"
+          find "$APP/Contents" -type f \( -name "*.dylib" -o -name "*.so" \) -print0 \
+            | xargs -0 -I{} codesign --force --timestamp --options runtime --sign "$IDENTITY" "{}"
+          codesign --force --timestamp --options runtime \
+            --entitlements packaging/entitlements.plist --sign "$IDENTITY" "$APP"
+          STAGING="$(mktemp -d)"; cp -R "$APP" "$STAGING/"; ln -s /Applications "$STAGING/Applications"
+          hdiutil create -volname "Parakeet Dictate" -srcfolder "$STAGING" -ov -format UDZO dist/ParakeetDictate.dmg
+          codesign --force --timestamp --sign "$IDENTITY" dist/ParakeetDictate.dmg
+          xcrun notarytool submit dist/ParakeetDictate.dmg \
+            --apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" --password "$NOTARY_PASSWORD" --wait
+          xcrun stapler staple dist/ParakeetDictate.dmg
+
+      - name: Attach DMG to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/ParakeetDictate.dmg
