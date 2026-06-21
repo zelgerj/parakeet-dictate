@@ -37,8 +37,9 @@ GitHub release asset — ready for end users.
 
 ## Automatically via GitHub Actions
 
-`.github/workflows/release.yml` builds + signs + notarizes on every `v*` tag and
-attaches the DMG to the release. Required repository secrets:
+`.github/workflows/release.yml` builds + signs + notarizes and attaches the DMG to a
+release. It is set to **manual** (`workflow_dispatch`) by default, so it never fails on a
+tag when secrets are missing. Required repository secrets:
 
 | Secret | Contents |
 |---|---|
@@ -49,10 +50,9 @@ attaches the DMG to the release. Required repository secrets:
 | `NOTARY_TEAM_ID` | your Team ID |
 | `NOTARY_PASSWORD` | app-specific password |
 
-Trigger a release:
-```bash
-git tag v1.0.0 && git push origin v1.0.0
-```
+Run it from the repo's **Actions** tab → **Release DMG** → **Run workflow**. To make it
+automatic on every tag instead, change the trigger in `release.yml` back to
+`on: { push: { tags: ["v*"] } }`.
 
 ## Versioning
 

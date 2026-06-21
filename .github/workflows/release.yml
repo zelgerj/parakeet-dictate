@@ -1,6 +1,9 @@
 name: Release DMG
 
-# Builds a signed, notarized DMG on every v* tag and attaches it to the release.
+# Manual-only (workflow_dispatch) — local releases are the default (see packaging/RELEASE.md),
+# so this never fails on a tag when the secrets below aren't configured.
+# To make releases automatic on every tag, add the secrets and switch the trigger to:
+#   on: { push: { tags: ["v*"] } }
 # Required repository secrets (Settings -> Secrets and variables -> Actions):
 #   MACOS_CERT_P12_BASE64  -> base64 -i DeveloperID.p12   (Developer ID cert as .p12)
 #   MACOS_CERT_PASSWORD    -> password of the .p12 export
@@ -10,8 +13,7 @@ name: Release DMG
 #   NOTARY_PASSWORD        -> app-specific password (appleid.apple.com)
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write   # to upload the release asset
