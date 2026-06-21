@@ -34,6 +34,8 @@ from parakeet_mlx import from_pretrained
 from parakeet_mlx.audio import get_logmel
 
 # ─── Configuration ───────────────────────────────────────────────────────────
+VERSION = "1.1.1"
+REPO_URL = "https://github.com/zelgerj/parakeet-dictate"
 MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
 SAMPLE_RATE = 16000
 CHANNELS = 1
@@ -210,14 +212,26 @@ from huggingface_hub.utils import tqdm as _hf_tqdm  # the tqdm hf actually uses
 
 
 class _ProgressTqdm(_hf_tqdm):
-    """Mirror the big-file download progress into the shared _dl dict."""
+    """Mirror the big-file download progress into the shared _dl dict.
+
+    tqdm auto-disables on a non-TTY (the bundled app logs to a file), so self.n never
+    advances — we accumulate the bytes passed to update() ourselves instead.
+    """
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        try:
+            if self.total and self.total > 100_000_000:  # the ~2.5 GB weights file
+                _dl["total"] = self.total
+                _dl["downloaded"] = self.n or 0
+        except Exception:
+            pass
 
     def update(self, n=1):
         r = super().update(n)
         try:
-            if self.total and self.total > 100_000_000:  # the ~2.5 GB weights file
-                _dl["downloaded"] = self.n
-                _dl["total"] = self.total
+            if self.total and self.total > 100_000_000:
+                _dl["downloaded"] += n or 0
         except Exception:
             pass
         return r
@@ -550,6 +564,7 @@ def run_menubar(rumps, dictation, listener):
                 self.copylast, settings_menu, None,
                 self.netline,
                 rumps.MenuItem("How to use", callback=self._how_to),
+                rumps.MenuItem("About Parakeet Dictate", callback=self._about),
             ]
 
             self._granted_prev = None
@@ -597,6 +612,19 @@ def run_menubar(rumps, dictation, listener):
                 ok="Got it",
             )
 
+        def _about(self, _):
+            if rumps.alert(
+                title="About Parakeet Dictate",
+                message=(f"Version {VERSION}\n\n"
+                         "100% local push-to-talk dictation for macOS.\n"
+                         "Powered by NVIDIA Parakeet TDT v3 via Apple MLX — nothing you say "
+                         "ever leaves your Mac.\n\n"
+                         f"{REPO_URL}"),
+                ok="Open on GitHub",
+                cancel="Close",
+            ):
+                open_url(REPO_URL)
+
         # ── timers ──
         def _refresh_icon(self, _):
             if self._needs_restart:
@@ -604,7 +632,7 @@ def run_menubar(rumps, dictation, listener):
                 return
             st = dictation.status
             if st == "downloading" and _dl["total"]:
-                self.title = f"⤓ {int(100 * _dl['downloaded'] / _dl['total'])}%"
+                self.title = f"⤓ {min(100, int(100 * _dl['downloaded'] / _dl['total']))}%"
             else:
                 self.title = ICONS.get(st, ICONS["idle"])
 
