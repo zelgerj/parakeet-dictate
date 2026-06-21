@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# Baut "dist/Parakeet Dictate.app" (unsigniert) aus dem Source.
-# Nutzung (aus der Repo-Wurzel):  ./packaging/build_app.sh
+# Builds "dist/Parakeet Dictate.app" (unsigned) from source.
+# Usage (from the repo root):  ./packaging/build_app.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
 VENV="${VENV:-.venv}"
 
-echo "==> Icon erzeugen (optional)"
-"$VENV/bin/python" packaging/make_icon.py || echo "   (Icon übersprungen)"
+echo "==> Generating icon (optional)"
+"$VENV/bin/python" packaging/make_icon.py || echo "   (icon skipped)"
 
-echo "==> Alte Build-Artefakte entfernen"
+echo "==> Removing old build artifacts"
 rm -rf build "dist/Parakeet Dictate.app"
 
-echo "==> PyInstaller-Build"
+echo "==> PyInstaller build"
 "$VENV/bin/pyinstaller" --noconfirm packaging/ParakeetDictate.spec
 
-echo "==> Fertig: dist/Parakeet Dictate.app"
+echo "==> Done: dist/Parakeet Dictate.app"

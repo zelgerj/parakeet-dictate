@@ -1,17 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller-Spec für die Menüleisten-App "Parakeet Dictate".
-# Build (aus der Repo-Wurzel):
+# PyInstaller spec for the menu-bar app "Parakeet Dictate".
+# Build (from the repo root):
 #     .venv/bin/pyinstaller --noconfirm packaging/ParakeetDictate.spec
-# Ergebnis: dist/Parakeet Dictate.app  (unsigniert; Signierung via sign_notarize_dmg.sh)
+# Result: dist/Parakeet Dictate.app  (unsigned; sign it via sign_notarize_dmg.sh)
 
 import os
 from PyInstaller.utils.hooks import collect_all
 
-ROOT = os.path.dirname(SPECPATH)  # SPECPATH = .../packaging  ->  Repo-Wurzel
+ROOT = os.path.dirname(SPECPATH)  # SPECPATH = .../packaging  ->  repo root
 
-# Native/„schwierige" Pakete vollständig einsammeln (Binaries, Daten, Submodule).
-# Bewiesen nötig zur Laufzeit: mlx (Metal), parakeet_mlx, numba, llvmlite,
-# librosa, scipy, soundfile. Rest zur Sicherheit.
+# Fully collect the native/"tricky" packages (binaries, data, submodules).
+# Proven to be needed at runtime: mlx (Metal), parakeet_mlx, numba, llvmlite,
+# librosa, scipy, soundfile. The rest are included to be safe.
 datas, binaries, hiddenimports = [], [], []
 for pkg in [
     "mlx", "parakeet_mlx", "numba", "llvmlite", "librosa", "scipy",
@@ -22,7 +22,7 @@ for pkg in [
     binaries += b
     hiddenimports += h
 
-# pyobjc-Frameworks für die nativen Berechtigungs-Abfragen im Onboarding
+# pyobjc frameworks for the native permission requests in the onboarding flow
 hiddenimports += ["ApplicationServices", "Quartz", "AVFoundation"]
 
 a = Analysis(
@@ -49,8 +49,8 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=False,                 # Menüleisten-App, kein Terminalfenster
-    target_arch="arm64",           # nur Apple Silicon
+    console=False,                 # menu-bar app, no terminal window
+    target_arch="arm64",           # Apple Silicon only
     entitlements_file=os.path.join(SPECPATH, "entitlements.plist"),
 )
 
@@ -65,7 +65,7 @@ coll = COLLECT(
 
 _ICON = os.path.join(SPECPATH, "icon.icns")
 if not os.path.exists(_ICON):
-    _ICON = None  # ohne Icon bauen, falls noch keins erzeugt wurde (make_icon.py)
+    _ICON = None  # build without an icon if none was generated yet (make_icon.py)
 
 app = BUNDLE(
     coll,
@@ -74,9 +74,9 @@ app = BUNDLE(
     bundle_identifier="digital.zelger.parakeetdictate",
     version="1.0.0",
     info_plist={
-        "LSUIElement": True,       # nur Menüleiste, kein Dock-Icon
+        "LSUIElement": True,       # menu bar only, no Dock icon
         "NSMicrophoneUsageDescription":
-            "Parakeet Dictate nimmt dein Mikrofon auf, um Sprache lokal zu Text zu transkribieren.",
+            "Parakeet Dictate records your microphone to transcribe speech to text locally.",
         "CFBundleShortVersionString": "1.0.0",
         "CFBundleVersion": "1.0.0",
         "LSMinimumSystemVersion": "14.0",

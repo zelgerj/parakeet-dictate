@@ -1,54 +1,51 @@
-# Parakeet Dictation Tool (macOS, v1)
+# Parakeet Dictate
 
-Minimales lokales Diktier-Tool für macOS auf Apple Silicon.
+Minimal, 100% local push-to-talk dictation for macOS on Apple Silicon.
 
-**Push-to-talk:** Hotkey gedrückt halten, sprechen, loslassen — das Gesprochene wird
-lokal mit **NVIDIA Parakeet TDT v3** (`mlx-community/parakeet-tdt-0.6b-v3`, multilingual,
-automatische Spracherkennung für Deutsch/Englisch u. a.) transkribiert und per
-Clipboard-Paste (`Cmd+V`) an der aktuellen Cursor-Position in der aktiven App eingefügt.
+Hold the right Option key, speak, release — your speech is transcribed locally with
+**NVIDIA Parakeet TDT v3** (`mlx-community/parakeet-tdt-0.6b-v3`, multilingual with
+automatic language detection for German/English and more) and inserted at the current
+cursor position via clipboard paste (`Cmd+V`).
 
-**100 % lokal.** Nach dem einmaligen Modell-Download (HuggingFace) verlässt zur Laufzeit
-kein Audio das Gerät — funktioniert auch offline / im Flugmodus.
-
----
-
-## Installation (Endnutzer)
-
-1. **`ParakeetDictate.dmg`** vom [neuesten Release](../../releases/latest) laden.
-2. DMG öffnen und **Parakeet Dictate** in den **Programme**-Ordner ziehen.
-3. App starten — beim ersten Start führt sie dich durch die drei nötigen Berechtigungen
-   (Mikrofon, Bedienungshilfen, Eingabeüberwachung) und lädt einmalig das Sprachmodell
-   (~1–2 GB) herunter.
-4. **Rechte Option-Taste** gedrückt halten, sprechen, loslassen — der Text erscheint an
-   der Cursor-Position.
-
-Die App ist signiert und notarisiert und öffnet ohne Gatekeeper-Warnung.
-
-> Der Rest dieser Datei beschreibt den Betrieb **aus dem Source** (Entwicklung).
-> Ein Release bauen: siehe [`packaging/RELEASE.md`](packaging/RELEASE.md).
+**100% local.** After the one-time model download (HuggingFace), no audio leaves the
+device at runtime — it works offline / in airplane mode too.
 
 ---
 
-## Voraussetzungen
+## Install (end users)
 
-- Apple Silicon Mac (M-Serie), **macOS 14+**
-- [`uv`](https://github.com/astral-sh/uv) oder Python **3.11+**
-- `ffmpeg` (wird von `parakeet-mlx` zum Einlesen von Audio benötigt)
+1. Download **`ParakeetDictate.dmg`** from the [latest release](../../releases/latest).
+2. Open the DMG and drag **Parakeet Dictate** into the **Applications** folder.
+3. Launch it — on first start it walks you through the three required permissions
+   (Microphone, Input Monitoring, Accessibility) and downloads the speech model
+   (~1–2 GB) once.
+4. Hold the **right Option key**, speak, release — the text appears at your cursor.
+
+The app is signed and notarized, so it opens without a Gatekeeper warning.
+
+> The rest of this file describes running **from source** (development).
+> To build a release, see [`packaging/RELEASE.md`](packaging/RELEASE.md).
+
+---
+
+## Requirements (from source)
+
+- Apple Silicon Mac (M-series), **macOS 14+**
+- [`uv`](https://github.com/astral-sh/uv) or Python **3.11+**
+- `ffmpeg` — **only** for the optional core-check script (`test_transcribe.py`).
+  The app itself decodes audio in-process and does **not** need ffmpeg.
 
 ---
 
 ## Setup
 
 ```bash
-# 1. ffmpeg (falls noch nicht vorhanden)
-brew install ffmpeg
-
-# 2. Environment anlegen + Dependencies installieren (mit uv)
+# 1. Create an environment + install dependencies (with uv)
 uv venv --python 3.12 .venv
 uv pip install -r requirements.txt
 ```
 
-Alternativ ohne `uv`:
+Alternatively without `uv`:
 
 ```bash
 python3.12 -m venv .venv
@@ -58,104 +55,105 @@ pip install -r requirements.txt
 
 ---
 
-## Kern-Check zuerst (empfohlen)
+## Core check first (recommended)
 
-Bevor Hotkey & Paste relevant werden, einmal prüfen, dass Modell + Transkription auf der
-Maschine sauber laufen. Eine kurze deutsche Test-WAV lässt sich mit dem macOS-`say`-Befehl
-erzeugen:
+Before the hotkey & paste matter, verify the model + transcription run cleanly on your
+machine. A short test WAV can be created with the macOS `say` command:
 
 ```bash
-say -v Anna -o sample.aiff "Guten Tag, dies ist ein Test mit Umlauten wie schön und größer."
-ffmpeg -y -i sample.aiff -ar 16000 -ac 1 sample.wav
+say -v Daniel -o sample.aiff "Hello, this is a test with a few words."
+ffmpeg -y -i sample.aiff -ar 16000 -ac 1 sample.wav   # needs ffmpeg
 
 .venv/bin/python test_transcribe.py sample.wav
 ```
 
-Beim **ersten** Lauf wird das Modell (~0.6 B Parameter) von HuggingFace geladen
-(einige Minuten, je nach Verbindung). Danach ist es lokal gecacht und der Modell-Load
-dauert nur noch ~1 s. Eine ~7-sekündige Aufnahme wird in unter 1 s transkribiert.
+On the **first** run the model (~0.6 B parameters) is downloaded from HuggingFace
+(a few minutes, depending on your connection). After that it is cached locally and the
+model load takes ~1 s. A ~7-second clip is transcribed in under a second.
 
 ---
 
-## macOS-Berechtigungen (häufigste Fehlerquelle!)
-
-Das Tool — bzw. der **Terminal-/Python-Prozess**, der es startet — braucht drei Rechte
-unter **Systemeinstellungen → Datenschutz & Sicherheit**:
-
-| Berechtigung | Wofür | Wo |
-|---|---|---|
-| **Mikrofon** | Aufnahme | Datenschutz & Sicherheit → *Mikrofon* |
-| **Bedienungshilfen** (Accessibility) | simuliertes `Cmd+V` | Datenschutz & Sicherheit → *Bedienungshilfen* |
-| **Eingabeüberwachung** (Input Monitoring) | globaler Hotkey-Listener | Datenschutz & Sicherheit → *Eingabeüberwachung* |
-
-Dort jeweils die App eintragen/aktivieren, aus der du startest — z. B. **Terminal**,
-**iTerm** oder die genutzte IDE.
-
-> **Wichtig:** Nach dem Vergeben der Rechte das Terminal (bzw. den Host-Prozess) **einmal
-> komplett neu starten**, sonst greifen die Berechtigungen nicht.
-
----
-
-## Benutzung
+## Usage
 
 ```bash
 source .venv/bin/activate
 python app.py
 ```
 
-1. Warten, bis im Log `Bereit.` steht (Modell ist geladen und warm).
-2. In einer beliebigen App den Cursor setzen (TextEdit, Browser, Slack …).
-3. **Rechte Option-Taste gedrückt halten** → kurzer Ton, Aufnahme läuft (🔴).
-4. Sprechen.
-5. **Loslassen** → Transkription (✍️), dann wird der Text am Cursor eingefügt + Ton.
+1. Wait until the log says `ready` (the model is loaded and warm).
+2. Place the cursor in any text field (TextEdit, browser, Slack, …).
+3. **Hold the right Option key** → a short sound, recording is live (🔴).
+4. Speak.
+5. **Release** → transcription (✍️), then the text is inserted at the cursor + a sound.
 
-Das Menüleisten-Icon zeigt den Status: 🎙️ idle · 🔴 Aufnahme · ✍️ Transkription.
-Beenden über **„Beenden"** im Menü (oder `Strg+C`, falls headless).
+The menu-bar icon shows the status: 🎙️ idle · 🔴 recording · ✍️ transcribing.
+Quit via **"Quit"** in the menu (or `Ctrl+C` if headless).
 
-Deutsch und Englisch funktionieren ohne Umschalten — die Sprache wird automatisch erkannt.
+German and English work without switching — the language is detected automatically.
 
 ---
 
-## Konfiguration
+## macOS permissions
 
-Alles über Konstanten oben in `app.py`:
+The app — i.e. the **process** that launches it — needs three permissions under
+**System Settings → Privacy & Security**:
 
-| Konstante | Default | Bedeutung |
+| Permission | For | Where |
 |---|---|---|
-| `HOTKEY` | `Key.alt_r` | Push-to-talk-Taste (z. B. `Key.cmd_r`, `Key.ctrl_r`) |
-| `MODEL_ID` | `mlx-community/parakeet-tdt-0.6b-v3` | ASR-Modell (nicht ändern für v1) |
-| `SAMPLE_RATE` | `16000` | Parakeet erwartet 16 kHz mono |
-| `USE_MENUBAR` | `True` | Menüleisten-Icon; auf `False` für rein headless (Log + Ton) |
-| `MIN_DURATION_S` | `0.3` | kürzere Aufnahmen (versehentlicher Tipp) ignorieren |
-| `PASTE_SETTLE_S` | `0.2` | Wartezeit vor Clipboard-Wiederherstellung |
+| **Microphone** | recording | Privacy & Security → *Microphone* |
+| **Accessibility** | simulated `Cmd+V` | Privacy & Security → *Accessibility* |
+| **Input Monitoring** | global hotkey listener | Privacy & Security → *Input Monitoring* |
+
+The bundled app requests these via native dialogs on first launch (and the menu has
+**"Request permissions…"** to re-trigger them). When running from source, grant the
+permissions to your **terminal** / IDE instead.
+
+> **Important:** after granting **Input Monitoring** and **Accessibility**, restart the
+> app once — those two only take effect after a restart (Microphone takes effect
+> immediately).
+
+---
+
+## Configuration
+
+Everything is a constant at the top of `app.py`:
+
+| Constant | Default | Meaning |
+|---|---|---|
+| `HOTKEY` | `Key.alt_r` | push-to-talk key (e.g. `Key.cmd_r`, `Key.ctrl_r`) |
+| `MODEL_ID` | `mlx-community/parakeet-tdt-0.6b-v3` | ASR model |
+| `SAMPLE_RATE` | `16000` | Parakeet expects 16 kHz mono |
+| `USE_MENUBAR` | `True` | menu-bar icon; set to `False` for pure headless (log + sound) |
+| `MIN_DURATION_S` | `0.3` | ignore shorter recordings (accidental tap) |
+| `PASTE_SETTLE_S` | `0.4` | wait before restoring the clipboard |
 
 ---
 
 ## Troubleshooting
 
-- **Hotkey reagiert nicht / keine Reaktion beim Drücken** → *Eingabeüberwachung* nicht
-  gewährt oder Terminal nicht neu gestartet.
-- **Text wird nicht eingefügt** (Log zeigt Transkription, aber nichts erscheint) →
-  *Bedienungshilfen* nicht gewährt.
-- **Stille / leere Transkription** → *Mikrofon* nicht gewährt oder falsches Eingabegerät
-  als System-Default ausgewählt.
-- **`ffmpeg not found`** → `brew install ffmpeg`.
-- **Warnung `You are sending unauthenticated requests to the HF Hub`** → harmlos, betrifft
-  nur die Download-Rate beim ersten Mal. Optional `HF_TOKEN` setzen.
+- **Hotkey does nothing** (no sound on press) → *Input Monitoring* not granted, or the
+  app/terminal wasn't restarted after granting it.
+- **Text is not inserted** (log shows the transcription, but nothing appears) →
+  *Accessibility* not granted.
+- **Silence / empty transcription** → *Microphone* not granted, or the wrong input
+  device is selected as the system default.
+- **App not in the Microphone list** → it only appears after it has requested access;
+  use the menu **"Request permissions…"**.
+- **`ffmpeg not found`** (only for `test_transcribe.py`) → `brew install ffmpeg`.
 
 ---
 
-## Lizenz-Hinweis
+## License note
 
-Die Parakeet-Gewichte stehen unter der **NVIDIA Community Model License**; die
-MLX-Konvertierung kommt über `mlx-community`. Für lokale, interne Nutzung unproblematisch.
-Vor einer etwaigen Weitergabe/Distribution die Lizenzbedingungen prüfen.
+The Parakeet weights are under the **NVIDIA Community Model License**; the MLX
+conversion comes via `mlx-community`. Unproblematic for local, internal use. Check the
+license terms before any redistribution.
 
 ---
 
-## Bekannter Upgrade-Pfad (Kontext, nicht in v1)
+## Known upgrade path (context, not implemented)
 
-Für eine spätere produktive Variante ist der native Weg **FluidAudio** (Swift SDK,
-Parakeet TDT v3 via CoreML auf der Apple Neural Engine, energieeffizienter, sehr hoher
-Realtime-Faktor) — derselbe Unterbau, den VoiceInk und Spokenly für Parakeet nutzen.
-v1 bleibt bewusst Python + `parakeet-mlx`, um schnell etwas Lauffähiges zu haben.
+For a future, production variant the native route is **FluidAudio** (Swift SDK,
+Parakeet TDT v3 via CoreML on the Apple Neural Engine, more energy-efficient, very high
+realtime factor) — the same foundation VoiceInk and Spokenly use for Parakeet. This v1
+deliberately stays Python + `parakeet-mlx` to get something working quickly.

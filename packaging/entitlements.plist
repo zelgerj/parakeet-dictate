@@ -2,19 +2,19 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- numba/llvmlite erzeugen zur Laufzeit ausführbaren Code (JIT).
-         Unter Hardened Runtime (für Notarisierung nötig) braucht das diese Rechte. -->
+    <!-- numba/llvmlite generate executable code at runtime (JIT).
+         Under the Hardened Runtime (required for notarization) this needs these. -->
     <key>com.apple.security.cs.allow-jit</key>
     <true/>
     <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
     <true/>
-    <!-- PyInstaller bündelt viele .dylib/.so; Library Validation deaktivieren,
-         damit sie geladen werden dürfen. -->
+    <!-- PyInstaller bundles many .dylib/.so; disable library validation so they
+         are allowed to load. -->
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
-    <!-- Mikrofonzugriff unter Hardened Runtime (non-sandboxed): ZWINGEND nötig,
-         sonst blockiert macOS das Mikrofon und die App erscheint nicht einmal in
-         der Mikrofon-Liste der Systemeinstellungen. -->
+    <!-- Microphone access under the Hardened Runtime (non-sandboxed): REQUIRED,
+         otherwise macOS blocks the microphone and the app never even shows up in
+         the Microphone list in System Settings. -->
     <key>com.apple.security.device.audio-input</key>
     <true/>
 </dict>

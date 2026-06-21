@@ -1,12 +1,12 @@
-# Parakeet Dictation Tool — Dependencies (macOS / Apple Silicon, Python 3.11+)
+# Parakeet Dictation Tool — dependencies (macOS / Apple Silicon, Python 3.11+)
 # ASR: NVIDIA Parakeet TDT v3 via MLX
-parakeet-mlx        # lädt mlx-community/parakeet-tdt-0.6b-v3, nutzt ffmpeg
-sounddevice         # Mikrofonaufnahme (16 kHz mono float32)
-soundfile           # temporäres WAV schreiben/lesen
-pynput              # globaler Hotkey-Listener + simuliertes Cmd+V
-pyperclip           # Clipboard sichern/setzen/wiederherstellen
-rumps               # Menüleisten-Icon mit Statuswechsel (optional)
-# Berechtigungen aktiv über native macOS-APIs anfragen (Onboarding der .app):
-pyobjc-framework-AVFoundation         # Mikrofon (requestAccessForMediaType)
-pyobjc-framework-Quartz               # Eingabeüberwachung (CGRequestListenEventAccess)
-pyobjc-framework-ApplicationServices  # Bedienungshilfen (AXIsProcessTrusted…)
+parakeet-mlx        # loads mlx-community/parakeet-tdt-0.6b-v3
+sounddevice         # microphone capture (16 kHz mono float32)
+soundfile           # WAV read/write (used by the core-check script)
+pynput              # global hotkey listener + simulated Cmd+V
+pyperclip           # save/set/restore the clipboard
+rumps               # menu-bar icon with status (optional)
+# Request permissions actively via native macOS APIs (.app onboarding):
+pyobjc-framework-AVFoundation         # Microphone (requestAccessForMediaType)
+pyobjc-framework-Quartz               # Input Monitoring (CGRequestListenEventAccess)
+pyobjc-framework-ApplicationServices  # Accessibility (AXIsProcessTrusted…)

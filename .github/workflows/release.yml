@@ -1,24 +1,24 @@
 name: Release DMG
 
-# Baut bei jedem v*-Tag ein signiertes, notarisiertes DMG und hängt es an den Release.
-# Benötigte Repository-Secrets (Settings -> Secrets and variables -> Actions):
-#   MACOS_CERT_P12_BASE64  -> base64 -i DeveloperID.p12   (Developer-ID-Zertifikat als .p12)
-#   MACOS_CERT_PASSWORD    -> Passwort des .p12-Exports
+# Builds a signed, notarized DMG on every v* tag and attaches it to the release.
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   MACOS_CERT_P12_BASE64  -> base64 -i DeveloperID.p12   (Developer ID cert as .p12)
+#   MACOS_CERT_PASSWORD    -> password of the .p12 export
 #   MACOS_SIGN_IDENTITY    -> "Developer ID Application: NAME (TEAMID)"
-#   NOTARY_APPLE_ID        -> Apple-ID
-#   NOTARY_TEAM_ID         -> Team-ID
-#   NOTARY_PASSWORD        -> App-spezifisches Passwort (appleid.apple.com)
+#   NOTARY_APPLE_ID        -> Apple ID
+#   NOTARY_TEAM_ID         -> Team ID
+#   NOTARY_PASSWORD        -> app-specific password (appleid.apple.com)
 
 on:
   push:
     tags: ["v*"]
 
 permissions:
-  contents: write   # für das Hochladen des Release-Assets
+  contents: write   # to upload the release asset
 
 jobs:
   build:
-    runs-on: macos-14   # Apple Silicon (für MLX/Metal erforderlich)
+    runs-on: macos-14   # Apple Silicon (required for MLX/Metal)
     steps:
       - uses: actions/checkout@v4
 
@@ -26,17 +26,17 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Dependencies installieren
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
 
-      - name: App bauen
+      - name: Build the app
         run: |
           python packaging/make_icon.py || true
           pyinstaller --noconfirm packaging/ParakeetDictate.spec
 
-      - name: Signatur-Zertifikat in temporären Keychain importieren
+      - name: Import signing certificate into a temporary keychain
         env:
           CERT_B64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
           CERT_PW: ${{ secrets.MACOS_CERT_PASSWORD }}
@@ -49,7 +49,7 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain >/dev/null
           rm -f /tmp/cert.p12
 
-      - name: Signieren, DMG, notarisieren, stapeln
+      - name: Sign, DMG, notarize, staple
         env:
           IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
           NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
@@ -68,7 +68,7 @@ jobs:
             --apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" --password "$NOTARY_PASSWORD" --wait
           xcrun stapler staple dist/ParakeetDictate.dmg
 
-      - name: DMG an den Release hängen
+      - name: Attach DMG to the release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/ParakeetDictate.dmg
