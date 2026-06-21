@@ -34,7 +34,7 @@ from parakeet_mlx import from_pretrained
 from parakeet_mlx.audio import get_logmel
 
 # ─── Configuration ───────────────────────────────────────────────────────────
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 REPO_URL = "https://github.com/zelgerj/parakeet-dictate"
 MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
 SAMPLE_RATE = 16000
@@ -615,7 +615,8 @@ def run_menubar(rumps, dictation, listener):
         def _about(self, _):
             if rumps.alert(
                 title="About Parakeet Dictate",
-                message=(f"Version {VERSION}\n\n"
+                message=(f"Version {VERSION}\n"
+                         "© 2026 Johann Zelger\n\n"
                          "100% local push-to-talk dictation for macOS.\n"
                          "Powered by NVIDIA Parakeet TDT v3 via Apple MLX — nothing you say "
                          "ever leaves your Mac.\n\n"
