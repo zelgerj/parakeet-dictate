@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+*.wav
+*.aiff
+.DS_Store
+
+# PyInstaller build outputs
+build/
+dist/
