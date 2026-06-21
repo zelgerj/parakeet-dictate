@@ -22,8 +22,8 @@ for pkg in [
     binaries += b
     hiddenimports += h
 
-# pyobjc frameworks for the native permission requests in the onboarding flow
-hiddenimports += ["ApplicationServices", "Quartz", "AVFoundation"]
+# pyobjc frameworks for the native permission requests + Open-at-Login
+hiddenimports += ["ApplicationServices", "Quartz", "AVFoundation", "ServiceManagement"]
 
 a = Analysis(
     [os.path.join(ROOT, "app.py")],
@@ -72,13 +72,13 @@ app = BUNDLE(
     name="Parakeet Dictate.app",
     icon=_ICON,
     bundle_identifier="digital.zelger.parakeetdictate",
-    version="1.0.1",
+    version="1.1.0",
     info_plist={
         "LSUIElement": True,       # menu bar only, no Dock icon
         "NSMicrophoneUsageDescription":
             "Parakeet Dictate records your microphone to transcribe speech to text locally.",
-        "CFBundleShortVersionString": "1.0.1",
-        "CFBundleVersion": "1.0.1",
+        "CFBundleShortVersionString": "1.1.0",
+        "CFBundleVersion": "1.1.0",
         "LSMinimumSystemVersion": "14.0",
         "NSHighResolutionCapable": True,
     },

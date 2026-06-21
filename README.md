@@ -108,24 +108,38 @@ The bundled app requests these via native dialogs on first launch (and the menu 
 **"Request permissions…"** to re-trigger them). When running from source, grant the
 permissions to your **terminal** / IDE instead.
 
-> **Important:** after granting **Input Monitoring** and **Accessibility**, restart the
-> app once — those two only take effect after a restart (Microphone takes effect
-> immediately).
+> **Important:** Input Monitoring and Accessibility only take effect after a restart
+> (Microphone is immediate). The menu shows a live ✓/⚠ checklist, and a one-click
+> **"Restart now"** does the relaunch for you the moment you've granted them.
 
 ---
 
-## Configuration
+## Settings
 
-Everything is a constant at the top of `app.py`:
+Most options live in the menu-bar **Settings** submenu (persisted to
+`~/Library/Application Support/ParakeetDictate/settings.json`):
 
-| Constant | Default | Meaning |
+| Setting | Options | Default |
 |---|---|---|
-| `HOTKEY` | `Key.alt_r` | push-to-talk key (e.g. `Key.cmd_r`, `Key.ctrl_r`) |
-| `MODEL_ID` | `mlx-community/parakeet-tdt-0.6b-v3` | ASR model |
-| `SAMPLE_RATE` | `16000` | Parakeet expects 16 kHz mono |
-| `USE_MENUBAR` | `True` | menu-bar icon; set to `False` for pure headless (log + sound) |
-| `MIN_DURATION_S` | `0.3` | ignore shorter recordings (accidental tap) |
-| `PASTE_SETTLE_S` | `0.4` | wait before restoring the clipboard |
+| **Trigger key** | Right Option · Right Command · Right Control · F5 · F6 | Right Option |
+| **Mode** | Hold to talk · Tap to start / stop | Hold to talk |
+| **Play sounds** | on / off | on |
+| **Show 'inserted' banner** | on / off | off |
+| **Tidy up text** | light cleanup (capitalize, collapse spaces) | off |
+| **Open at Login** | on / off | off |
+
+The menu also shows a live **permission checklist** (✓/⚠ per permission, each links to
+its own Settings pane), a **download-progress** line on first run, a one-click
+**Restart** after granting permissions, and **Copy last transcript** as a
+paste-failure safety net. A few low-level constants remain at the top of `app.py`
+(`MODEL_ID`, `SAMPLE_RATE`, `MIN_DURATION_S`, `PASTE_SETTLE_S`, `MAX_RECORDING_S`).
+
+## Privacy
+
+100% local, and the app makes it true: after the one-time model download it sets
+`HF_HUB_OFFLINE` (zero network on a normal launch), disables HuggingFace telemetry, and
+**never writes transcript text to disk** (the log keeps metadata only). The menu shows a
+`Network: offline · nothing sent` line as visible proof.
 
 ---
 
