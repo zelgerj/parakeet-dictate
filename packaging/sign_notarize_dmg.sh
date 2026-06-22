@@ -38,6 +38,17 @@ codesign --force --timestamp --options runtime \
 echo "==> Verifying signature"
 codesign --verify --deep --strict --verbose=2 "$APP"
 
+# Notarize + staple the .app ITSELF (before the DMG) so the self-updater can verify the
+# downloaded app's notarization OFFLINE via spctl. This is a second notarytool submission.
+echo "==> Notarizing + stapling the .app (offline-verifiable updates)"
+APP_ZIP="dist/_ParakeetDictate-app.zip"
+rm -f "$APP_ZIP"
+ditto -c -k --keepParent "$APP" "$APP_ZIP"
+xcrun notarytool submit "$APP_ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+xcrun stapler staple "$APP"
+xcrun stapler validate "$APP"
+rm -f "$APP_ZIP"
+
 echo "==> Building DMG (with an Applications shortcut for drag & drop)"
 rm -f "$DMG"
 STAGING="$(mktemp -d)"

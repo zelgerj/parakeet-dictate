@@ -136,10 +136,12 @@ paste-failure safety net. A few low-level constants remain at the top of `app.py
 
 ## Privacy
 
-100% local, and the app makes it true: after the one-time model download it sets
-`HF_HUB_OFFLINE` (zero network on a normal launch), disables HuggingFace telemetry, and
-**never writes transcript text to disk** (the log keeps metadata only). The menu shows a
-`Network: offline · nothing sent` line as visible proof.
+Your audio and transcripts stay on your Mac: after the one-time model download the app
+sets `HF_HUB_OFFLINE` (no transcription network), disables HuggingFace telemetry, and
+**never writes transcript text to disk** (the log keeps metadata only). The only routine
+outbound call is a **daily check to GitHub for app updates** — it sends nothing about you,
+verifies the download's Apple notarization + Developer-ID signature before installing, and
+can be turned off under **Settings → Updates**. The menu discloses this.
 
 ---
 

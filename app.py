@@ -33,8 +33,10 @@ from pynput.keyboard import Controller, Key
 from parakeet_mlx import from_pretrained
 from parakeet_mlx.audio import get_logmel
 
+import updater
+
 # ─── Configuration ───────────────────────────────────────────────────────────
-VERSION = "1.1.2"
+VERSION = "1.2.0"
 REPO_URL = "https://github.com/zelgerj/parakeet-dictate"
 MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
 SAMPLE_RATE = 16000
@@ -74,6 +76,9 @@ DEFAULTS = {
     "play_sounds": True,
     "show_inserted_banner": False,
     "auto_format": False,
+    "auto_check_updates": True,
+    "update_etag": "",
+    "last_update_check": 0.0,
 }
 
 SETTINGS_PANES = {
@@ -255,8 +260,16 @@ class Dictation:
         self._press_active = False     # toggle-mode auto-repeat guard
         self._rec_started = 0.0
         self.notifications = queue.Queue()  # posted on the main thread by the menu Timer
+        self.update_info = None       # dict(version, dmg_url, notes) when an update is available
+        self.update_status = "idle"   # idle | downloading
+        self.update_progress = (0, 0)
 
+        try:
+            updater.cleanup_old(updater.current_app_path())
+        except Exception:
+            pass
         threading.Thread(target=self._worker_loop, daemon=True).start()
+        threading.Thread(target=self._update_loop, daemon=True).start()
 
     @property
     def hotkey(self):
@@ -326,6 +339,51 @@ class Dictation:
 
     def _hotkey_label(self):
         return HOTKEYS.get(self.settings.get("hotkey"), HOTKEYS["alt_r"])[0]
+
+    # ─── Self-update ──────────────────────────────────────────────────────────
+    def _update_loop(self):
+        time.sleep(8)  # defer past launch/onboarding
+        while True:
+            try:
+                if (self.settings.get("auto_check_updates", True)
+                        and time.time() - self.settings.get("last_update_check", 0) >= 23 * 3600):
+                    self._do_check(quiet=True)
+            except Exception as e:
+                print(f"[Update] {e}", file=sys.stderr)
+            time.sleep(3600)
+
+    def _do_check(self, quiet=False):
+        etag = self.settings.get("update_etag") or None
+        info, new_etag = updater.check(VERSION, etag if quiet else None)
+        self.settings["update_etag"] = new_etag or ""
+        self.settings["last_update_check"] = time.time()
+        save_settings(self.settings)
+        if info:
+            self.update_info = info
+            self.notify("Update available",
+                        f"Parakeet Dictate {info['version']} is available — open the menu to install.")
+        elif not quiet:
+            self.notify("You're up to date", f"Version {VERSION} is the latest.")
+
+    def check_updates_now(self):
+        threading.Thread(target=lambda: self._do_check(quiet=False), daemon=True).start()
+
+    def start_update(self):
+        if not self.update_info or self.recording or self.update_status == "downloading":
+            return
+        info = self.update_info
+        self.update_status = "downloading"
+        self.update_progress = (0, 0)
+
+        def run():
+            try:
+                _, msg = updater.install(info["dmg_url"],
+                                         lambda got, total: setattr(self, "update_progress", (got, total)))
+            except Exception as e:
+                msg = f"Update failed: {e}"
+            self.update_status = "idle"
+            self.notify("Update", msg)
+        threading.Thread(target=run, daemon=True).start()
 
     # ─── Recording ────────────────────────────────────────────────────────────
     def start_recording(self):
@@ -558,10 +616,20 @@ def run_menubar(rumps, dictation, listener):
             for it in (trigger, mode, self.snd, self.banner, self.fmt, self.login):
                 settings_menu.add(it)
 
+            self.updnow = rumps.MenuItem("Checking…")
+            self.autoupd = rumps.MenuItem("Automatically check for updates",
+                                          callback=self._toggle("auto_check_updates"))
+            updates_menu = rumps.MenuItem("Updates")
+            for it in (self.updnow,
+                       rumps.MenuItem("Check for Updates…", callback=lambda _: dictation.check_updates_now()),
+                       self.autoupd,
+                       rumps.MenuItem("What's New", callback=lambda _: open_url(REPO_URL + "/releases/latest"))):
+                updates_menu.add(it)
+
             self.menu = [
                 self.hdr, self.statusline, None,
                 self.mic, self.inp, self.acc, self.restart, None,
-                self.copylast, settings_menu, None,
+                self.copylast, settings_menu, updates_menu, None,
                 self.netline,
                 rumps.MenuItem("How to use", callback=self._how_to),
                 rumps.MenuItem("About Parakeet Dictate", callback=self._about),
@@ -619,7 +687,8 @@ def run_menubar(rumps, dictation, listener):
                          "© 2026 Johann Zelger\n\n"
                          "100% local push-to-talk dictation for macOS.\n"
                          "Powered by NVIDIA Parakeet TDT v3 via Apple MLX — nothing you say "
-                         "ever leaves your Mac.\n\n"
+                         "ever leaves your Mac.\n"
+                         "(Checks GitHub ~daily for app updates; nothing about you is sent.)\n\n"
                          f"{REPO_URL}"),
                 ok="Open on GitHub",
                 cancel="Close",
@@ -628,6 +697,10 @@ def run_menubar(rumps, dictation, listener):
 
         # ── timers ──
         def _refresh_icon(self, _):
+            if dictation.update_status == "downloading":
+                got, total = dictation.update_progress
+                self.title = f"⬆ {int(100 * got / total) if total else 0}%"
+                return
             if self._needs_restart:
                 self.title = ICONS["restart"]
                 return
@@ -678,7 +751,10 @@ def run_menubar(rumps, dictation, listener):
 
             # status line
             st = dictation.status
-            if st == "downloading":
+            if dictation.update_status == "downloading":
+                got, total = dictation.update_progress
+                self.statusline.title = f"Downloading update… {int(100 * got / total) if total else 0}%"
+            elif st == "downloading":
                 self.statusline.title = self._download_line()
             elif st == "error":
                 self.statusline.title = "⚠  Couldn't load the model — see below"
@@ -692,19 +768,35 @@ def run_menubar(rumps, dictation, listener):
                 self.statusline.title = f"● Recording… ({int(time.time() - dictation._rec_started)}s)"
             elif st == "transcribing":
                 self.statusline.title = "✍️  Transcribing…"
+            elif dictation.update_info:
+                self.statusline.title = f"⬆  Update available: {dictation.update_info['version']}  (Updates ▸)"
             else:
                 self.statusline.title = "Ready — hold the key and speak"
 
             self.copylast.title = ("Copy last transcript" if dictation.last_transcripts
                                    else "Copy last transcript (none yet)")
-            self.netline.title = ("🔒  Network: offline · nothing sent" if dictation.offline
-                                  else "Network: online (one-time setup)")
+            self.netline.title = ("🔒  Audio & text stay on your Mac"
+                                  + (" · daily GitHub update check"
+                                     if dictation.settings.get("auto_check_updates", True) else ""))
+
+            # updates
+            if dictation.update_status == "downloading":
+                got, total = dictation.update_progress
+                self.updnow.title = f"Downloading… {int(100 * got / total) if total else 0}%"
+                self.updnow.set_callback(None)
+            elif dictation.update_info:
+                self.updnow.title = f"⬆  Install {dictation.update_info['version']} & Relaunch"
+                self.updnow.set_callback(lambda _: dictation.start_update())
+            else:
+                self.updnow.title = "You're up to date"
+                self.updnow.set_callback(None)
 
             # toggles -> checkmarks
             self.snd.state = 1 if dictation.settings.get("play_sounds") else 0
             self.banner.state = 1 if dictation.settings.get("show_inserted_banner") else 0
             self.fmt.state = 1 if dictation.settings.get("auto_format") else 0
             self.login.state = 1 if login_item_enabled() else 0
+            self.autoupd.state = 1 if dictation.settings.get("auto_check_updates", True) else 0
             for name, it in HK_ITEMS.items():
                 it.state = 1 if dictation.settings.get("hotkey") == name else 0
             for key, it in MODE_ITEMS.items():
