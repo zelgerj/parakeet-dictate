@@ -2,7 +2,7 @@
 
 Minimal, 100% local push-to-talk dictation for macOS on Apple Silicon.
 
-Hold the right Option key, speak, release — your speech is transcribed locally with
+Hold Left Option + Space, speak, release — your speech is transcribed locally with
 **NVIDIA Parakeet TDT v3** (`mlx-community/parakeet-tdt-0.6b-v3`, multilingual with
 automatic language detection for German/English and more) and inserted at the current
 cursor position via clipboard paste (`Cmd+V`).
@@ -19,7 +19,7 @@ device at runtime — it works offline / in airplane mode too.
 3. Launch it — on first start it walks you through the three required permissions
    (Microphone, Input Monitoring, Accessibility) and downloads the speech model
    (~1–2 GB) once.
-4. Hold the **right Option key**, speak, release — the text appears at your cursor.
+4. Hold **Left Option + Space**, speak, release — the text appears at your cursor.
 
 The app is signed and notarized, so it opens without a Gatekeeper warning.
 
@@ -82,7 +82,7 @@ python app.py
 
 1. Wait until the log says `ready` (the model is loaded and warm).
 2. Place the cursor in any text field (TextEdit, browser, Slack, …).
-3. **Hold the right Option key** → a short sound, recording is live (🔴).
+3. **Hold Left Option + Space** → a short sound, recording is live (🔴).
 4. Speak.
 5. **Release** → transcription (✍️), then the text is inserted at the cursor + a sound.
 
@@ -121,7 +121,7 @@ Most options live in the menu-bar **Settings** submenu (persisted to
 
 | Setting | Options | Default |
 |---|---|---|
-| **Trigger key** | Right Option · Right Command · Right Control · F5 · F6 | Right Option |
+| **Trigger key** | Left Option + Space · Right Option · Right Command · Right Control · F5 · F6 | Left Option + Space |
 | **Mode** | Hold to talk · Tap to start / stop | Hold to talk |
 | **Play sounds** | on / off | on |
 | **Show 'inserted' banner** | on / off | off |

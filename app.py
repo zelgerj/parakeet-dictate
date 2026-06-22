@@ -36,7 +36,7 @@ from parakeet_mlx.audio import get_logmel
 import updater
 
 # ─── Configuration ───────────────────────────────────────────────────────────
-VERSION = "1.2.1"
+VERSION = "1.2.2"
 REPO_URL = "https://github.com/zelgerj/parakeet-dictate"
 MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
 SAMPLE_RATE = 16000
@@ -50,8 +50,12 @@ START_SOUND = "/System/Library/Sounds/Pop.aiff"
 DONE_SOUND = "/System/Library/Sounds/Glass.aiff"
 FAIL_SOUND = "/System/Library/Sounds/Tink.aiff"
 
-# Curated, safe global trigger keys (name -> (label, pynput Key)).
+# Curated, safe global triggers (name -> (label, spec)).
+# A spec is either a single pynput Key, or a (modifier, key) tuple for a chord.
+# Chord triggers fire on `key` only while `modifier` is held; the `key` keystroke
+# is swallowed (see make_listener's darwin_intercept) so it never types a character.
 HOTKEYS = {
+    "alt_l_space": ("Left Option + Space", (Key.alt_l, Key.space)),
     "alt_r": ("Right Option", Key.alt_r),
     "cmd_r": ("Right Command", Key.cmd_r),
     "ctrl_r": ("Right Control", Key.ctrl_r),
@@ -71,7 +75,7 @@ FIRST_READY_FLAG = os.path.join(APP_DIR, ".first_ready")
 LOG_PATH = os.path.expanduser("~/Library/Logs/ParakeetDictate.log")
 
 DEFAULTS = {
-    "hotkey": "alt_r",
+    "hotkey": "alt_l_space",
     "mode": "hold",                 # "hold" | "toggle"
     "play_sounds": True,
     "show_inserted_banner": False,
@@ -258,6 +262,8 @@ class Dictation:
         self.load_error = None
         self.offline = False           # True once running fully offline (cached)
         self._press_active = False     # toggle-mode auto-repeat guard
+        self._alt_l_down = False       # chord: is the Left Option modifier held?
+        self._space_suppressed = False # chord: did we swallow the matching space-down?
         self._rec_started = 0.0
         self.notifications = queue.Queue()  # posted on the main thread by the menu Timer
         self.update_info = None       # dict(version, dmg_url, notes) when an update is available
@@ -272,8 +278,23 @@ class Dictation:
         threading.Thread(target=self._update_loop, daemon=True).start()
 
     @property
+    def hotkey_spec(self):
+        return HOTKEYS.get(self.settings.get("hotkey"), HOTKEYS["alt_l_space"])[1]
+
+    @property
+    def is_chord(self):
+        return isinstance(self.hotkey_spec, tuple)
+
+    @property
     def hotkey(self):
-        return HOTKEYS.get(self.settings.get("hotkey"), HOTKEYS["alt_r"])[1]
+        """The single key that starts/stops recording (the chord's trigger key)."""
+        spec = self.hotkey_spec
+        return spec[1] if isinstance(spec, tuple) else spec
+
+    @property
+    def chord_modifier(self):
+        spec = self.hotkey_spec
+        return spec[0] if isinstance(spec, tuple) else None
 
     def notify(self, title, message):
         self.notifications.put((title, message))
@@ -338,7 +359,7 @@ class Dictation:
             threading.Thread(target=self._worker_loop, daemon=True).start()
 
     def _hotkey_label(self):
-        return HOTKEYS.get(self.settings.get("hotkey"), HOTKEYS["alt_r"])[0]
+        return HOTKEYS.get(self.settings.get("hotkey"), HOTKEYS["alt_l_space"])[0]
 
     # ─── Self-update ──────────────────────────────────────────────────────────
     def _update_loop(self):
@@ -529,9 +550,11 @@ class Dictation:
 
 
 def make_listener(dictation):
-    def on_press(key):
-        if key != dictation.hotkey:
-            return
+    from Quartz import (CGEventGetIntegerValueField, kCGKeyboardEventKeycode,
+                        kCGEventKeyDown, kCGEventKeyUp)
+    SPACE_VK = Key.space.value.vk          # 49 on macOS
+
+    def fire_press():
         if dictation.settings.get("mode") == "toggle":
             if not dictation._press_active:           # ignore key auto-repeat
                 dictation._press_active = True
@@ -542,15 +565,53 @@ def make_listener(dictation):
         else:
             dictation.start_recording()
 
-    def on_release(key):
-        if key != dictation.hotkey:
-            return
+    def fire_release():
         if dictation.settings.get("mode") == "toggle":
             dictation._press_active = False
         else:
             dictation.stop_recording()
 
-    return keyboard.Listener(on_press=on_press, on_release=on_release)
+    def on_press(key):
+        if dictation.is_chord:
+            if key == dictation.chord_modifier:
+                dictation._alt_l_down = True
+                return
+            # The trigger only counts while the modifier is held.
+            if key == dictation.hotkey and dictation._alt_l_down:
+                fire_press()
+            return
+        if key == dictation.hotkey:
+            fire_press()
+
+    def on_release(key):
+        if dictation.is_chord:
+            if key == dictation.chord_modifier:
+                dictation._alt_l_down = False
+                fire_release()                        # releasing the modifier ends the chord
+                return
+            if key == dictation.hotkey:
+                fire_release()
+            return
+        if key == dictation.hotkey:
+            fire_release()
+
+    def intercept(event_type, event):
+        # Swallow the chord's trigger keystroke (Space) so it never types a
+        # character — but only while the chord is active and we're inside a hold
+        # that began with the modifier down. Everything else passes through.
+        if dictation.is_chord and dictation.hotkey == Key.space:
+            if CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode) == SPACE_VK:
+                if event_type == kCGEventKeyDown and (dictation._alt_l_down
+                                                      or dictation._space_suppressed):
+                    dictation._space_suppressed = True
+                    return None
+                if event_type == kCGEventKeyUp and dictation._space_suppressed:
+                    dictation._space_suppressed = False
+                    return None
+        return event
+
+    return keyboard.Listener(on_press=on_press, on_release=on_release,
+                             darwin_intercept=intercept)
 
 
 def restart_app():
