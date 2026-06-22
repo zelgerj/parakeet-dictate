@@ -36,7 +36,7 @@ from parakeet_mlx.audio import get_logmel
 import updater
 
 # ─── Configuration ───────────────────────────────────────────────────────────
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 REPO_URL = "https://github.com/zelgerj/parakeet-dictate"
 MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
 SAMPLE_RATE = 16000
@@ -788,7 +788,7 @@ def run_menubar(rumps, dictation, listener):
                 self.updnow.title = f"⬆  Install {dictation.update_info['version']} & Relaunch"
                 self.updnow.set_callback(lambda _: dictation.start_update())
             else:
-                self.updnow.title = "You're up to date"
+                self.updnow.title = f"You're up to date (v{VERSION})"
                 self.updnow.set_callback(None)
 
             # toggles -> checkmarks
