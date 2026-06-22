@@ -14,7 +14,7 @@ device at runtime — it works offline / in airplane mode too.
 
 ## Install (end users)
 
-1. Download **`ParakeetDictate.dmg`** from the [latest release](../../releases/latest).
+1. Download **`ParakeetDictate.dmg`** from the [latest release (v1.2.1)](../../releases/tag/v1.2.1).
 2. Open the DMG and drag **Parakeet Dictate** into the **Applications** folder.
 3. Launch it — on first start it walks you through the three required permissions
    (Microphone, Input Monitoring, Accessibility) and downloads the speech model
