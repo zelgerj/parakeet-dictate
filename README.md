@@ -90,6 +90,8 @@ The menu-bar icon shows the status: 🎙️ idle · 🔴 recording · ✍️ tra
 Quit via **"Quit"** in the menu (or `Ctrl+C` if headless).
 
 German and English work without switching — the language is detected automatically.
+Long recordings keep going until you stop (up to the **Max recording** cap) and are
+transcribed in overlapping chunks, so a long session is never cut off mid-way.
 
 ---
 
@@ -123,6 +125,7 @@ Most options live in the menu-bar **Settings** submenu (persisted to
 |---|---|---|
 | **Trigger key** | Left Option + Space · Right Option · Right Command · Right Control · F5 · F6 | Left Option + Space |
 | **Mode** | Hold to talk · Tap to start / stop | Hold to talk |
+| **Max recording** | 5 · 15 · 30 · 60 minutes (auto-stop cap) | 30 minutes |
 | **Play sounds** | on / off | on |
 | **Show 'inserted' banner** | on / off | off |
 | **Tidy up text** | light cleanup (capitalize, collapse spaces) | off |

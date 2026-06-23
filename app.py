@@ -32,17 +32,23 @@ from pynput.keyboard import Controller, Key
 
 from parakeet_mlx import from_pretrained
 from parakeet_mlx.audio import get_logmel
+from parakeet_mlx.parakeet import (merge_longest_contiguous,
+                                   merge_longest_common_subsequence,
+                                   tokens_to_sentences, sentences_to_result,
+                                   DecodingConfig)
 
 import updater
 
 # ─── Configuration ───────────────────────────────────────────────────────────
-VERSION = "1.2.4"
+VERSION = "1.2.5"
 REPO_URL = "https://github.com/zelgerj/parakeet-dictate"
 MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
 SAMPLE_RATE = 16000
 CHANNELS = 1
 MIN_DURATION_S = 0.3        # ignore shorter recordings (accidental tap)
-MAX_RECORDING_S = 120       # safety cap so a missed key-release can't record forever
+MAX_RECORDING_CHOICES = [5, 15, 30, 60]   # minutes; configurable cap (Settings → Max recording)
+CHUNK_DURATION_S = 120      # audio longer than this is transcribed in overlapping chunks (long-form)
+CHUNK_OVERLAP_S = 15        # overlap between chunks so words on the seam aren't lost
 PASTE_SETTLE_S = 0.4        # wait for the paste to land before restoring the clipboard
 SILENCE_RMS = 0.002         # below this the buffer is treated as "no mic signal"
 MLX_CACHE_LIMIT = 512 * 1024 * 1024   # bound MLX's retained Metal buffer cache (long-uptime hygiene)
@@ -82,6 +88,7 @@ DEFAULTS = {
     "play_sounds": True,
     "show_inserted_banner": False,
     "auto_format": False,
+    "max_recording_min": 30,        # auto-stop a runaway recording after this many minutes
     "auto_check_updates": True,
     "update_etag": "",
     "last_update_check": 0.0,
@@ -524,14 +531,18 @@ class Dictation:
         self.paste(text)
 
     def _transcribe(self, audio, duration):
-        """Audio buffer straight to mel -> model (no ffmpeg, no temp WAV)."""
+        """Audio buffer straight to mel -> model (no ffmpeg, no temp WAV).
+        Long recordings are transcribed in overlapping chunks so an arbitrarily long
+        session never overflows a single generate() call."""
         try:
-            samples = mx.array(audio.reshape(-1).astype(np.float32))
-            mel = get_logmel(samples, self.model.preprocessor_config)
             t0 = time.perf_counter()
-            result = self.model.generate(mel)[0]
+            if duration > CHUNK_DURATION_S:
+                text = self._transcribe_long(audio)
+            else:
+                samples = mx.array(audio.reshape(-1).astype(np.float32))
+                mel = get_logmel(samples, self.model.preprocessor_config)
+                text = (self.model.generate(mel)[0].text or "").strip()
             dt = time.perf_counter() - t0
-            text = (result.text or "").strip()
             # Privacy: log metadata only, never the transcript text.
             print(f"📝 transcribed {duration:.1f}s audio in {dt:.2f}s ({len(text)} chars)")
             return text
@@ -544,6 +555,44 @@ class Dictation:
                 mx.clear_cache()   # free MLX's retained buffer pool so memory can't ratchet over hours
             except Exception:
                 pass
+
+    def _transcribe_long(self, audio):
+        """Long-form transcription: slide an overlapping window over the audio, transcribe
+        each chunk, and stitch the tokens (mirrors parakeet_mlx.transcribe but in-memory,
+        with per-chunk cache clearing so memory stays flat over a long recording)."""
+        pc = self.model.preprocessor_config
+        sr = pc.sample_rate
+        a = audio.reshape(-1).astype(np.float32)
+        chunk = int(CHUNK_DURATION_S * sr)
+        overlap = int(CHUNK_OVERLAP_S * sr)
+        step = chunk - overlap
+        tokens = []
+        for start in range(0, len(a), step):
+            end = min(start + chunk, len(a))
+            if end - start < pc.hop_length:      # avoid a zero-length mel on the tail
+                break
+            mel = get_logmel(mx.array(a[start:end]), pc)
+            res = self.model.generate(mel)[0]
+            offset = start / sr
+            for sentence in res.sentences:
+                for tok in sentence.tokens:
+                    tok.start += offset
+                    tok.end = tok.start + tok.duration
+            if tokens:
+                try:
+                    tokens = merge_longest_contiguous(tokens, res.tokens,
+                                                      overlap_duration=CHUNK_OVERLAP_S)
+                except RuntimeError:
+                    tokens = merge_longest_common_subsequence(tokens, res.tokens,
+                                                              overlap_duration=CHUNK_OVERLAP_S)
+            else:
+                tokens = res.tokens
+            try:
+                mx.clear_cache()
+            except Exception:
+                pass
+        result = sentences_to_result(tokens_to_sentences(tokens, DecodingConfig().sentence))
+        return (result.text or "").strip()
 
     def _fail(self, message):
         if self.settings.get("play_sounds", True):
@@ -725,6 +774,7 @@ def run_headless(listener):
 def run_menubar(rumps, dictation, listener):
     HK_ITEMS = {}   # hotkey name -> MenuItem
     MODE_ITEMS = {}
+    MAXREC_ITEMS = {}   # max-recording minutes -> MenuItem
 
     class MenuApp(rumps.App):
         def __init__(self):
@@ -752,6 +802,12 @@ def run_menubar(rumps, dictation, listener):
                 mi = rumps.MenuItem(label, callback=self._make_set_mode(key))
                 MODE_ITEMS[key] = mi
                 mode.add(mi)
+            # Max recording submenu (auto-stop cap; long recordings transcribe in chunks)
+            maxrec = rumps.MenuItem("Max recording")
+            for m in MAX_RECORDING_CHOICES:
+                mi = rumps.MenuItem(f"{m} minutes", callback=self._make_set_maxrec(m))
+                MAXREC_ITEMS[m] = mi
+                maxrec.add(mi)
 
             self.snd = rumps.MenuItem("Play sounds", callback=self._toggle("play_sounds"))
             self.banner = rumps.MenuItem("Show 'inserted' banner", callback=self._toggle("show_inserted_banner"))
@@ -759,7 +815,7 @@ def run_menubar(rumps, dictation, listener):
             self.login = rumps.MenuItem("Open at Login", callback=self._toggle_login)
 
             settings_menu = rumps.MenuItem("Settings")
-            for it in (trigger, mode, self.snd, self.banner, self.fmt, self.login):
+            for it in (trigger, mode, maxrec, self.snd, self.banner, self.fmt, self.login):
                 settings_menu.add(it)
 
             self.updnow = rumps.MenuItem("Checking…")
@@ -803,6 +859,12 @@ def run_menubar(rumps, dictation, listener):
         def _make_set_mode(self, m):
             def cb(_):
                 dictation.settings["mode"] = m
+                save_settings(dictation.settings)
+            return cb
+
+        def _make_set_maxrec(self, minutes):
+            def cb(_):
+                dictation.settings["max_recording_min"] = minutes
                 save_settings(dictation.settings)
             return cb
 
@@ -947,9 +1009,12 @@ def run_menubar(rumps, dictation, listener):
                 it.state = 1 if dictation.settings.get("hotkey") == name else 0
             for key, it in MODE_ITEMS.items():
                 it.state = 1 if dictation.settings.get("mode") == key else 0
+            cur_max = dictation.settings.get("max_recording_min", 30)
+            for m, it in MAXREC_ITEMS.items():
+                it.state = 1 if m == cur_max else 0
 
-            # safety cap: auto-stop a runaway recording
-            if dictation.recording and (time.time() - dictation._rec_started) > MAX_RECORDING_S:
+            # safety cap: auto-stop a runaway recording after the configured limit
+            if dictation.recording and (time.time() - dictation._rec_started) > cur_max * 60:
                 dictation.stop_recording()
 
         def _set_perm(self, item, label, ok):
