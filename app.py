@@ -36,7 +36,7 @@ from parakeet_mlx.audio import get_logmel
 import updater
 
 # ─── Configuration ───────────────────────────────────────────────────────────
-VERSION = "1.2.3"
+VERSION = "1.2.4"
 REPO_URL = "https://github.com/zelgerj/parakeet-dictate"
 MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
 SAMPLE_RATE = 16000
@@ -260,6 +260,8 @@ class Dictation:
         self.kb = Controller()
         self.model = None
         self.jobs = queue.Queue(maxsize=8)   # bounded: back-pressure instead of unbounded growth
+        self._job_started = 0.0              # watchdog: when the current job began (0 = idle)
+        self._job_budget = JOB_TIMEOUT_FLOOR_S
         self.last_transcripts = []     # in-memory only, newest last
         self.load_error = None
         self.offline = False           # True once running fully offline (cached)
@@ -351,34 +353,37 @@ class Dictation:
             except Exception:
                 pass
 
+        # The stall watchdog runs in a SEPARATE thread that does no MLX work — it only
+        # watches the clock. MLX's GPU stream is thread-local and bound to THIS worker
+        # thread (where the model loaded), so _process must run here, never in a
+        # sub-thread (that raises "no Stream(gpu, 0) in current thread").
+        threading.Thread(target=self._monitor_loop, daemon=True).start()
         while True:
             frames = self.jobs.get()
-            done = threading.Event()
-
-            def _run(frames=frames, done=done):
-                try:
-                    self._process(frames)
-                except Exception as e:
-                    print(f"[Error] {e}", file=sys.stderr)
-                finally:
-                    done.set()
-
-            # Self-recovery: a real transcription is sub-realtime, so 8x the clip
-            # length (min JOB_TIMEOUT_FLOOR_S) can only be exceeded by a genuine
-            # stall/wedge (MLX Metal queue, a blocked native call). A Python thread
-            # can't kill such a native block — only replacing the process image frees
-            # the wedged GPU state — so on timeout we relaunch instead of needing the
-            # user to quit and restart manually.
+            # Budget: a real transcription is sub-realtime, so 8x the clip length (min
+            # JOB_TIMEOUT_FLOOR_S) can only be exceeded by a genuine stall/wedge.
             try:
                 secs = sum(f.shape[0] for f in frames) / SAMPLE_RATE if frames else 0
             except Exception:
                 secs = 0
-            budget = max(JOB_TIMEOUT_FLOOR_S, 8 * secs)
-
-            threading.Thread(target=_run, daemon=True).start()
-            if done.wait(budget):
+            self._job_budget = max(JOB_TIMEOUT_FLOOR_S, 8 * secs)
+            self._job_started = time.time()
+            try:
+                self._process(frames)
+            except Exception as e:
+                print(f"[Error] {e}", file=sys.stderr)
+            finally:
+                self._job_started = 0.0
                 self.status = "idle"
-            else:
+
+    def _monitor_loop(self):
+        """Watchdog: if a job runs past its budget the worker is wedged in a native call
+        that Python can't interrupt — relaunch the process so the app self-recovers
+        instead of needing a manual restart."""
+        while True:
+            time.sleep(2)
+            started = self._job_started
+            if started and time.time() - started > self._job_budget:
                 print("[Recover] transcription stalled past budget — relaunching",
                       file=sys.stderr)
                 self.notify("Parakeet recovered",
