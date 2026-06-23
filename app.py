@@ -36,7 +36,7 @@ from parakeet_mlx.audio import get_logmel
 import updater
 
 # ─── Configuration ───────────────────────────────────────────────────────────
-VERSION = "1.2.2"
+VERSION = "1.2.3"
 REPO_URL = "https://github.com/zelgerj/parakeet-dictate"
 MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
 SAMPLE_RATE = 16000
@@ -45,6 +45,8 @@ MIN_DURATION_S = 0.3        # ignore shorter recordings (accidental tap)
 MAX_RECORDING_S = 120       # safety cap so a missed key-release can't record forever
 PASTE_SETTLE_S = 0.4        # wait for the paste to land before restoring the clipboard
 SILENCE_RMS = 0.002         # below this the buffer is treated as "no mic signal"
+MLX_CACHE_LIMIT = 512 * 1024 * 1024   # bound MLX's retained Metal buffer cache (long-uptime hygiene)
+JOB_TIMEOUT_FLOOR_S = 30    # min self-recovery budget; scales up with clip length (see _worker_loop)
 
 START_SOUND = "/System/Library/Sounds/Pop.aiff"
 DONE_SOUND = "/System/Library/Sounds/Glass.aiff"
@@ -257,7 +259,7 @@ class Dictation:
         self.stream = None
         self.kb = Controller()
         self.model = None
-        self.jobs = queue.Queue()
+        self.jobs = queue.Queue(maxsize=8)   # bounded: back-pressure instead of unbounded growth
         self.last_transcripts = []     # in-memory only, newest last
         self.load_error = None
         self.offline = False           # True once running fully offline (cached)
@@ -332,6 +334,12 @@ class Dictation:
             self.load_error = e
             print(f"[Error] Could not load model: {e}", file=sys.stderr)
             return
+        # Cap the retained Metal buffer cache so resident GPU memory can't ratchet up
+        # over thousands of transcriptions and eventually wedge the command queue.
+        try:
+            mx.set_cache_limit(MLX_CACHE_LIMIT)
+        except Exception:
+            pass
         self.status = "idle"
         print(f"Model loaded in {time.perf_counter() - t0:.1f}s — ready.")
         if not os.path.exists(FIRST_READY_FLAG):
@@ -344,13 +352,39 @@ class Dictation:
                 pass
 
         while True:
-            stream, frames = self.jobs.get()
+            frames = self.jobs.get()
+            done = threading.Event()
+
+            def _run(frames=frames, done=done):
+                try:
+                    self._process(frames)
+                except Exception as e:
+                    print(f"[Error] {e}", file=sys.stderr)
+                finally:
+                    done.set()
+
+            # Self-recovery: a real transcription is sub-realtime, so 8x the clip
+            # length (min JOB_TIMEOUT_FLOOR_S) can only be exceeded by a genuine
+            # stall/wedge (MLX Metal queue, a blocked native call). A Python thread
+            # can't kill such a native block — only replacing the process image frees
+            # the wedged GPU state — so on timeout we relaunch instead of needing the
+            # user to quit and restart manually.
             try:
-                self._process(stream, frames)
-            except Exception as e:
-                print(f"[Error] {e}", file=sys.stderr)
-            finally:
+                secs = sum(f.shape[0] for f in frames) / SAMPLE_RATE if frames else 0
+            except Exception:
+                secs = 0
+            budget = max(JOB_TIMEOUT_FLOOR_S, 8 * secs)
+
+            threading.Thread(target=_run, daemon=True).start()
+            if done.wait(budget):
                 self.status = "idle"
+            else:
+                print("[Recover] transcription stalled past budget — relaunching",
+                      file=sys.stderr)
+                self.notify("Parakeet recovered",
+                            "Transcription stalled after long uptime — restarting to clear it.")
+                time.sleep(0.3)
+                _self_restart()
 
     def retry_load(self):
         if self.model is None:
@@ -416,6 +450,8 @@ class Dictation:
         buf = self.frames
 
         def callback(indata, n_frames, time_info, status_flags):
+            if not self.recording:       # stop appending the instant recording ends
+                return
             if status_flags:
                 print(f"[Audio] {status_flags}", file=sys.stderr)
             buf.append(indata.copy())
@@ -426,6 +462,12 @@ class Dictation:
             self.stream.start()
         except Exception as e:
             self.recording = False
+            try:                          # never leak a half-opened HAL client
+                if self.stream is not None:
+                    self.stream.close()
+            except Exception:
+                pass
+            self.stream = None
             print(f"[Error] Could not start recording: {e}", file=sys.stderr)
             self.notify("Microphone blocked",
                         "Parakeet couldn't access the microphone. Open Microphone settings to fix it.")
@@ -437,17 +479,22 @@ class Dictation:
     def stop_recording(self):
         if not self.recording:
             return
-        self.recording = False
+        self.recording = False                 # callback stops appending immediately
         self.status = "transcribing"
-        self.jobs.put((self.stream, self.frames))
-
-    def _process(self, stream, frames):
+        s, self.stream = self.stream, None
+        frames = list(self.frames)             # snapshot: a late in-flight callback can't mutate it
+        # Tear the audio stream down OFF every critical thread. A PortAudio close can
+        # block, and it must never wedge the listener, main, or worker thread — so we
+        # detach it. The snapshot above already froze the audio data.
+        if s is not None:
+            threading.Thread(target=_close_stream, args=(s,), daemon=True).start()
         try:
-            stream.stop()
-            stream.close()
-        except Exception:
-            pass
+            self.jobs.put_nowait(frames)
+        except queue.Full:
+            self.status = "idle"
+            self.notify("Parakeet busy", "Still catching up — that one was dropped. Try again.")
 
+    def _process(self, frames):
         if not frames:
             return
         audio = np.concatenate(frames, axis=0)
@@ -487,6 +534,11 @@ class Dictation:
             print(f"[Error] Transcription failed: {e}", file=sys.stderr)
             self._fail("Transcription failed — see the log for details.")
             return ""
+        finally:
+            try:
+                mx.clear_cache()   # free MLX's retained buffer pool so memory can't ratchet over hours
+            except Exception:
+                pass
 
     def _fail(self, message):
         if self.settings.get("play_sounds", True):
@@ -614,6 +666,15 @@ def make_listener(dictation):
                              darwin_intercept=intercept)
 
 
+def _close_stream(s):
+    """Stop + close a sounddevice stream. Run detached — a PortAudio close can block."""
+    try:
+        s.stop()
+        s.close()
+    except Exception:
+        pass
+
+
 def restart_app():
     """Relaunch the bundled .app (used after permission grants)."""
     if not getattr(sys, "frozen", False):
@@ -624,6 +685,25 @@ def restart_app():
     if p.endswith(".app"):
         subprocess.Popen(["open", "-n", p])
         time.sleep(0.4)
+    os._exit(0)
+
+
+def _self_restart():
+    """Replace the running process with a fresh copy — the only way to clear a wedged
+    native call (MLX Metal queue / PortAudio HAL) without the user quitting manually.
+    Works both bundled (.app) and from source."""
+    try:
+        if getattr(sys, "frozen", False):
+            p = sys.executable
+            while p and not p.endswith(".app") and p != "/":
+                p = os.path.dirname(p)
+            if p.endswith(".app"):
+                subprocess.Popen(["open", "-n", p])
+                time.sleep(0.4)
+        else:
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+    except Exception:
+        pass
     os._exit(0)
 
 

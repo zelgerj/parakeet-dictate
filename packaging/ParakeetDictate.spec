@@ -72,13 +72,13 @@ app = BUNDLE(
     name="Parakeet Dictate.app",
     icon=_ICON,
     bundle_identifier="digital.zelger.parakeetdictate",
-    version="1.2.2",
+    version="1.2.3",
     info_plist={
         "LSUIElement": True,       # menu bar only, no Dock icon
         "NSMicrophoneUsageDescription":
             "Parakeet Dictate records your microphone to transcribe speech to text locally.",
-        "CFBundleShortVersionString": "1.2.2",
-        "CFBundleVersion": "1.2.2",
+        "CFBundleShortVersionString": "1.2.3",
+        "CFBundleVersion": "1.2.3",
         "LSMinimumSystemVersion": "14.0",
         "NSHighResolutionCapable": True,
     },
