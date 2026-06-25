@@ -40,7 +40,7 @@ from parakeet_mlx.parakeet import (merge_longest_contiguous,
 import updater
 
 # ─── Configuration ───────────────────────────────────────────────────────────
-VERSION = "1.2.5"
+VERSION = "1.2.6"
 REPO_URL = "https://github.com/zelgerj/parakeet-dictate"
 MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
 SAMPLE_RATE = 16000
@@ -276,6 +276,7 @@ class Dictation:
         self._alt_l_down = False       # chord: is the Left Option modifier held?
         self._space_suppressed = False # chord: did we swallow the matching space-down?
         self._rec_started = 0.0
+        self._ctl = queue.Queue()      # start/stop commands, run off the key-event thread
         self.notifications = queue.Queue()  # posted on the main thread by the menu Timer
         self.update_info = None       # dict(version, dmg_url, notes) when an update is available
         self.update_status = "idle"   # idle | downloading
@@ -287,6 +288,25 @@ class Dictation:
             pass
         threading.Thread(target=self._worker_loop, daemon=True).start()
         threading.Thread(target=self._update_loop, daemon=True).start()
+        threading.Thread(target=self._control_loop, daemon=True).start()
+
+    def _control_loop(self):
+        """Execute start/stop OFF the macOS event-tap thread. Opening/closing a CoreAudio
+        stream can be slow; doing it inside the key-event callback can exceed the system's
+        event-tap timeout, which makes macOS DISABLE the tap — after which no key events
+        arrive at all and the hotkey (e.g. a second tap to stop) silently stops working.
+        Keeping the callback instant and doing the slow work here prevents that."""
+        while True:
+            action = self._ctl.get()
+            try:
+                if action == "start":
+                    self.start_recording()
+                elif action == "stop":
+                    self.stop_recording()
+                elif action == "toggle":
+                    self.stop_recording() if self.recording else self.start_recording()
+            except Exception as e:
+                print(f"[Control] {e}", file=sys.stderr)
 
     @property
     def hotkey_spec(self):
@@ -660,22 +680,22 @@ def make_listener(dictation):
                         kCGEventKeyDown, kCGEventKeyUp)
     SPACE_VK = Key.space.value.vk          # 49 on macOS
 
+    # Dispatch only — NEVER do slow work (opening/closing the audio stream) here. These
+    # run on the macOS event-tap thread; a slow callback gets the tap disabled by the OS
+    # and then no further key events arrive (so a second tap can't stop the recording).
     def fire_press():
         if dictation.settings.get("mode") == "toggle":
             if not dictation._press_active:           # ignore key auto-repeat
                 dictation._press_active = True
-                if dictation.recording:
-                    dictation.stop_recording()
-                else:
-                    dictation.start_recording()
+                dictation._ctl.put("toggle")
         else:
-            dictation.start_recording()
+            dictation._ctl.put("start")
 
     def fire_release():
         if dictation.settings.get("mode") == "toggle":
             dictation._press_active = False
         else:
-            dictation.stop_recording()
+            dictation._ctl.put("stop")
 
     def on_press(key):
         if dictation.is_chord:
@@ -1015,7 +1035,7 @@ def run_menubar(rumps, dictation, listener):
 
             # safety cap: auto-stop a runaway recording after the configured limit
             if dictation.recording and (time.time() - dictation._rec_started) > cur_max * 60:
-                dictation.stop_recording()
+                dictation._ctl.put("stop")
 
         def _set_perm(self, item, label, ok):
             item.title = f"✓  {label}" if ok else f"⚠  {label} — click to grant"
